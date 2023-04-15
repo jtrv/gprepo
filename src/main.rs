@@ -131,7 +131,7 @@ fn main() -> io::Result<()> {
         File::open(preamble_path)?.read_to_string(&mut preamble)?;
         writeln!(writer, "{}", preamble)?;
     } else {
-        writeln!(writer, "The following text is a Git repository formatted in sections that begin with `@@@@ <file-location> @@@@`, followed by a variable amount of lines containing that file's contents, when the text `@@@@@ END @@@@@` is encountered that is the end of the git repository's files. Any further text beyond `@@@@@ END @@@@@` is meant to be interpreted as instructions using the aforementioned Git repository as context.")?;
+        writeln!(writer, "Below is a repository containing files. Each file begins with @@@@<file-path>@@@@ followed by its content. The repository ends with @@@@END@@@@. After this marker, instructions related to the repository are provided.")?;
     }
 
     for entry in WalkDir::new(&repo_path) {
@@ -155,7 +155,7 @@ fn main() -> io::Result<()> {
                 continue;
             }
 
-            writeln!(writer, "@@@@ {} @@@@", relative_file_path.display())?;
+            writeln!(writer, "@@@@{}@@@@", relative_file_path.display())?;
 
             let mut file_contents = String::new();
             File::open(file_path)?.read_to_string(&mut file_contents)?;
@@ -163,6 +163,6 @@ fn main() -> io::Result<()> {
         }
     }
 
-    writeln!(writer, "@@@@@@ END @@@@@@")?;
+    writeln!(writer, "@@@@END@@@@")?;
     Ok(())
 }
