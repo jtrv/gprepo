@@ -34,7 +34,7 @@ fn is_binary(file_path: &Path) -> io::Result<bool> {
 
 fn main() -> io::Result<()> {
     let matches = App::new("gptrepo")
-        .version("1.0")
+        .version("0.1.0")
         .arg(
             Arg::new("repo_path")
                 .short('r')
