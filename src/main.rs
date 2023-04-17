@@ -5,6 +5,8 @@ use globset::GlobSetBuilder;
 use std::fs::File;
 use std::io::{self, stdout, BufReader, BufWriter, Read, Write};
 use std::path::Path;
+use std::path::PathBuf;
+use std::time::SystemTime;
 use walkdir::WalkDir;
 
 fn is_binary(file_path: &Path) -> Result<bool> {
@@ -101,6 +103,9 @@ fn main() -> Result<()> {
         )
         .get_matches();
 
+    let output_path: Option<PathBuf> = matches.value_of("output").map(PathBuf::from);
+    let process_start_time = SystemTime::now();
+
     let repo = match matches.value_of("repo_path") {
         Some(path) => Repository::discover(path).context("Could not find repository")?,
         None => {
@@ -151,6 +156,21 @@ fn main() -> Result<()> {
         let entry = entry?;
         if entry.file_type().is_file() {
             let file_path = entry.path();
+
+            if output_path
+                .as_ref()
+                .map_or(false, |op| op.as_path() == file_path)
+            {
+                continue;
+            }
+
+            let metadata = file_path.metadata()?;
+            if let Ok(modified_time) = metadata.modified() {
+                if modified_time >= process_start_time {
+                    continue;
+                }
+            }
+
             let relative_file_path = file_path.strip_prefix(repo_path).unwrap();
 
             let should_ignore = repo.status_should_ignore(relative_file_path).map_err(|e| {
