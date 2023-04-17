@@ -66,7 +66,7 @@ fn process_file_contents(file_path: &Path, content: &str) -> String {
 }
 
 fn main() -> Result<()> {
-    let matches = App::new("gptrepo")
+    let matches = App::new("gprepo")
         .version("0.1.0")
         .arg(
             Arg::new("repo_path")
