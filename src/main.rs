@@ -1,3 +1,4 @@
+use anyhow::{Context, Result};
 use clap::{App, Arg};
 use git2::{Repository, StatusOptions, StatusShow};
 use globset::GlobSetBuilder;
@@ -6,33 +7,63 @@ use std::io::{self, stdout, BufReader, BufWriter, Read, Write};
 use std::path::Path;
 use walkdir::WalkDir;
 
-fn is_binary(file_path: &Path) -> io::Result<bool> {
+fn is_binary(file_path: &Path) -> Result<bool> {
     let mut buffer = [0; 1024];
     let mut reader = BufReader::new(File::open(file_path)?);
     let mut total_read = 0;
 
     loop {
         let read = reader.read(&mut buffer)?;
-
         if read == 0 {
             break;
         }
-
         if buffer.iter().take(read).any(|&byte| byte == 0) {
             return Ok(true);
         }
-
         total_read += read;
-
         if total_read >= 1024 {
             break;
         }
     }
-
     Ok(false)
 }
 
-fn main() -> io::Result<()> {
+fn process_file_contents(file_path: &Path, content: &str) -> String {
+    let extension = file_path
+        .extension()
+        .and_then(|os_str| os_str.to_str())
+        .unwrap_or("");
+
+    let significant_whitespace_extensions = [
+        "py", "nim", "hs", "yml", "yaml", "coffee", "jade", "pug", "slim", "sass", "haml",
+    ];
+
+    let no_indentation_extensions = [
+        "rs", "js", "ts", "c", "cpp", "h", "hpp", "java", "go", "cs", "rb", "php", "swift", "kt",
+        "kts", "scala", "groovy", "fs", "fsx", "clj", "cljs", "edn", "lisp", "el", "scm", "ss",
+        "rkt", "jl", "lua", "tcl", "pl", "pm", "elm", "erl", "hrl", "v", "sv", "svh", "html",
+        "css", "scss", "less", "json", "xml", "sql", "md", "toml", "ini", "conf", "cfg", "sh",
+        "bash", "zsh", "ps1", "awk", "sed",
+    ];
+    let mut processed = String::new();
+    for line in content.lines() {
+        let processed_line = if significant_whitespace_extensions.contains(&extension) {
+            line.replace("    ", "\t")
+        } else if no_indentation_extensions.contains(&extension) {
+            line.trim_start().to_string()
+        } else {
+            line.to_string()
+        };
+
+        if !processed_line.is_empty() {
+            processed.push_str(&processed_line);
+            processed.push('\n');
+        }
+    }
+    processed
+}
+
+fn main() -> Result<()> {
     let matches = App::new("gptrepo")
         .version("0.1.0")
         .arg(
@@ -71,29 +102,16 @@ fn main() -> io::Result<()> {
         .get_matches();
 
     let repo = match matches.value_of("repo_path") {
-        Some(path) => Repository::discover(path).map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("Could not find repository: {:?}", e),
-            )
-        })?,
+        Some(path) => Repository::discover(path).context("Could not find repository")?,
         None => {
             let current_dir = std::env::current_dir()?;
-            Repository::discover(current_dir).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::NotFound,
-                    format!("Could not find repository: {:?}", e),
-                )
-            })?
+            Repository::discover(current_dir).context("Could not find repository")?
         }
     };
 
-    let repo_path = repo.workdir().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::NotFound,
-            "Could not find repository working directory",
-        )
-    })?;
+    let repo_path = repo
+        .workdir()
+        .ok_or_else(|| anyhow::anyhow!("Could not find repository working directory"))?;
 
     let mut _gitignore = repo
         .statuses(Some(
@@ -101,12 +119,7 @@ fn main() -> io::Result<()> {
                 .include_ignored(false)
                 .show(StatusShow::IndexAndWorkdir),
         ))
-        .map_err(|e| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("Failed to read gitignore: {:?}", e),
-            )
-        })?;
+        .context("Failed to read gitignore")?;
 
     let ignore_list = {
         let mut builder = GlobSetBuilder::new();
@@ -134,11 +147,11 @@ fn main() -> io::Result<()> {
         writeln!(writer, "Below is a repository containing files. Each file begins with @@@@<file-path>@@@@ followed by its content. The repository ends with @@@@END@@@@. After this marker, instructions related to the repository are provided.")?;
     }
 
-    for entry in WalkDir::new(&repo_path) {
+    for entry in WalkDir::new(repo_path) {
         let entry = entry?;
         if entry.file_type().is_file() {
             let file_path = entry.path();
-            let relative_file_path = file_path.strip_prefix(&repo_path).unwrap();
+            let relative_file_path = file_path.strip_prefix(repo_path).unwrap();
 
             let should_ignore = repo.status_should_ignore(relative_file_path).map_err(|e| {
                 io::Error::new(
@@ -150,19 +163,17 @@ fn main() -> io::Result<()> {
             if should_ignore || ignore_list.is_match(relative_file_path) {
                 continue;
             }
-
             if is_binary(file_path)? {
                 continue;
             }
 
             writeln!(writer, "@@@@{}@@@@", relative_file_path.display())?;
-
             let mut file_contents = String::new();
             File::open(file_path)?.read_to_string(&mut file_contents)?;
-            writeln!(writer, "{}", file_contents)?;
+            let processed_contents = process_file_contents(file_path, &file_contents);
+            writeln!(writer, "{}", processed_contents)?;
         }
     }
-
     writeln!(writer, "@@@@END@@@@")?;
     Ok(())
 }

@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1"
 clap = "3"
 git2 = "0.13.24"
 globset = "0.4.8"
