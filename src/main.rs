@@ -134,8 +134,14 @@ fn main() -> Result<()> {
             }
         }
         // Add patterns for LICENSE and .gitignore
-        builder.add("LICENSE".parse().unwrap());
+        builder.add("*changelog*".parse().unwrap());
+        builder.add("*CHANGELOG*".parse().unwrap());
+        builder.add(".github*".parse().unwrap());
         builder.add(".gitignore".parse().unwrap());
+        builder.add("gprepo".parse().unwrap());
+        builder.add("*LICENSE*".parse().unwrap());
+        builder.add("*.lock".parse().unwrap());
+        builder.add("*README*".parse().unwrap());
         builder.build().unwrap()
     };
 
