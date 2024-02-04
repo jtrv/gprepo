@@ -1,4 +1,4 @@
-# gprepo <img src="https://www.pngall.com/wp-content/uploads/9/Star-Wars-C-3PO-Vector-Transparent.png" style="width:3.5rem;">
+# gprepo <img width="28" src="https://www.pngall.com/wp-content/uploads/9/Star-Wars-C-3PO-Vector-Transparent.png">
 
 [`/dʒiːpiːˈɹi:pi:oʊ/`](http://ipa-reader.xyz/?text=%2Fd%CA%92i%CB%90pi%CB%90%CB%88%C9%B9i%3Api%3Ao%CA%8A%2F&voice=Joey)
 
