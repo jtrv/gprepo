@@ -1,9 +1,9 @@
 use anyhow::{Context, Result};
-use clap::{App, Arg};
+use clap::{Arg, Command};
 use git2::{Repository, StatusOptions, StatusShow};
 use globset::GlobSetBuilder;
 use std::fs::File;
-use std::io::{self, stdout, BufReader, BufWriter, Read, Write};
+use std::io::{self, BufReader, BufWriter, Read, Write, stdout};
 use std::path::Path;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -41,11 +41,11 @@ fn process_file_contents(file_path: &Path, content: &str) -> String {
     ];
 
     let no_indentation_extensions = [
-        "rs", "js", "ts", "c", "cpp", "h", "hpp", "java", "go", "cs", "rb", "php", "swift", "kt",
-        "kts", "scala", "groovy", "fs", "fsx", "clj", "cljs", "edn", "lisp", "el", "scm", "ss",
-        "rkt", "jl", "lua", "tcl", "pl", "pm", "elm", "erl", "hrl", "v", "sv", "svh", "html",
-        "css", "scss", "less", "json", "xml", "sql", "md", "toml", "ini", "conf", "cfg", "sh",
-        "bash", "zsh", "ps1", "awk", "sed",
+        "rs", "js", "jsx", "ts", "tsx", "c", "cpp", "h", "hpp", "java", "go", "cs", "rb", "php",
+        "swift", "kt", "kts", "scala", "groovy", "fs", "fsx", "clj", "cljs", "edn", "lisp", "el",
+        "scm", "ss", "rkt", "jl", "lua", "tcl", "pl", "pm", "elm", "erl", "hrl", "v", "sv", "svh",
+        "html", "css", "scss", "less", "json", "xml", "sql", "md", "toml", "ini", "conf", "cfg",
+        "sh", "bash", "zsh", "ps1", "awk", "sed",
     ];
     let mut processed = String::new();
     for line in content.lines() {
@@ -65,16 +65,30 @@ fn process_file_contents(file_path: &Path, content: &str) -> String {
     processed
 }
 
+fn is_child_of(child: &str, parent: &str) -> bool {
+    let parent = parent.trim_end_matches('/');
+    child.starts_with(parent)
+        && (child.len() == parent.len() || child[parent.len()..].starts_with('/'))
+}
+
 fn main() -> Result<()> {
-    let matches = App::new("gprepo")
+    let matches = Command::new("gprepo")
         .version("0.1.0")
+        .arg(
+            Arg::new("output")
+                .short('o')
+                .long("output")
+                .value_name("OUTPUT_PATH")
+                .help("Output to path (default: stdout)")
+                .required(false),
+        )
         .arg(
             Arg::new("repo_path")
                 .short('r')
                 .long("repo-path")
                 .value_name("REPO_PATH")
                 .help("Path to the repository")
-                .takes_value(true),
+                .required(false),
         )
         .arg(
             Arg::new("preamble")
@@ -82,31 +96,34 @@ fn main() -> Result<()> {
                 .long("preamble")
                 .value_name("PREAMBLE_PATH")
                 .help("Optional path to the preamble file")
-                .takes_value(true),
+                .required(false),
         )
         .arg(
-            Arg::new("output")
-                .short('o')
-                .long("output")
-                .value_name("OUTPUT_PATH")
-                .help("Output file path (default: stdout)")
-                .takes_value(true),
+            Arg::new("exclude")
+                .short('e')
+                .long("exclude")
+                .value_name("EXCLUDE_PATH")
+                .help("File paths to exclude (supports glob patterns)")
+                .required(false)
+                .num_args(1..)
+                .action(clap::ArgAction::Append),
         )
         .arg(
-            Arg::new("ignore")
+            Arg::new("include")
                 .short('i')
-                .long("ignore")
-                .value_name("IGNORE_PATH")
-                .help("File paths to ignore")
-                .takes_value(true)
-                .multiple_occurrences(true),
+                .long("include")
+                .value_name("INCLUDE_PATH")
+                .help("Only process these specific paths (supports glob patterns)")
+                .required(false)
+                .num_args(1..)
+                .action(clap::ArgAction::Append),
         )
         .get_matches();
 
-    let output_path: Option<PathBuf> = matches.value_of("output").map(PathBuf::from);
+    let output_path: Option<PathBuf> = matches.get_one::<String>("output").map(PathBuf::from);
     let process_start_time = SystemTime::now();
 
-    let repo = match matches.value_of("repo_path") {
+    let repo = match matches.get_one::<String>("repo_path") {
         Some(path) => Repository::discover(path).context("Could not find repository")?,
         None => {
             let current_dir = std::env::current_dir()?;
@@ -126,14 +143,14 @@ fn main() -> Result<()> {
         ))
         .context("Failed to read gitignore")?;
 
-    let ignore_list = {
+    let exclude_set = {
         let mut builder = GlobSetBuilder::new();
-        if let Some(ignore_paths) = matches.values_of("ignore") {
-            for path in ignore_paths {
+        if let Some(exclude_paths) = matches.get_many::<String>("exclude") {
+            for path in exclude_paths {
                 builder.add(path.parse().unwrap());
             }
         }
-        // Add patterns for LICENSE and .gitignore
+        // Add default patterns
         builder.add("*changelog*".parse().unwrap());
         builder.add("*CHANGELOG*".parse().unwrap());
         builder.add(".github*".parse().unwrap());
@@ -145,27 +162,70 @@ fn main() -> Result<()> {
         builder.build().unwrap()
     };
 
-    let mut writer: Box<dyn Write> = match matches.value_of("output") {
+    let mut writer: Box<dyn Write> = match matches.get_one::<String>("output") {
         Some(output_path) => Box::new(BufWriter::new(File::create(output_path)?)),
         None => Box::new(BufWriter::new(stdout())),
     };
 
-    if let Some(preamble_path) = matches.value_of("preamble") {
+    if let Some(preamble_path) = matches.get_one::<String>("preamble") {
         let mut preamble = String::new();
         File::open(preamble_path)?.read_to_string(&mut preamble)?;
         writeln!(writer, "{}", preamble)?;
     } else {
-        writeln!(writer, "Below is a repository containing files. Each file begins with @@@@<file-path>@@@@ followed by its content. The repository ends with @@@@END@@@@. After this marker, instructions related to the repository are provided.")?;
+        writeln!(
+            writer,
+            "Below is a repository containing files. Each file begins with @@@@<file-path>@@@@ followed by its content. The repository ends with @@@@END@@@@. After this marker, instructions related to the repository are provided."
+        )?;
     }
 
     for entry in WalkDir::new(repo_path) {
         let entry = entry?;
         if entry.file_type().is_file() {
             let file_path = entry.path();
+            let relative_file_path = file_path.strip_prefix(repo_path).unwrap();
+            let path_str = relative_file_path.to_str().unwrap_or("");
+
+            let mut should_exclude = false;
+            if let Some(exclude_paths) = matches.get_many::<String>("exclude") {
+                for exclude_path in exclude_paths {
+                    if is_child_of(path_str, exclude_path) {
+                        should_exclude = true;
+                        break;
+                    }
+                }
+            }
+
+            let mut should_include = matches.get_many::<String>("include").is_none();
+            if let Some(include_path) = matches.get_many::<String>("include") {
+                for include_path in include_path {
+                    if is_child_of(path_str, include_path) {
+                        should_include = true;
+                        break;
+                    }
+                }
+            }
+
+            if should_exclude || !should_include {
+                continue;
+            }
+
+            if exclude_set.is_match(path_str) {
+                continue;
+            }
+
+            let should_ignore = repo.status_should_ignore(relative_file_path).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("Failed to check if path should be ignored: {:?}", e),
+                )
+            })?;
+            if should_ignore {
+                continue;
+            }
 
             if output_path
                 .as_ref()
-                .map_or(false, |op| op.as_path() == file_path)
+                .is_some_and(|op| op.as_path() == file_path)
             {
                 continue;
             }
@@ -177,18 +237,6 @@ fn main() -> Result<()> {
                 }
             }
 
-            let relative_file_path = file_path.strip_prefix(repo_path).unwrap();
-
-            let should_ignore = repo.status_should_ignore(relative_file_path).map_err(|e| {
-                io::Error::new(
-                    io::ErrorKind::Other,
-                    format!("Failed to check if path should be ignored: {:?}", e),
-                )
-            })?;
-
-            if should_ignore || ignore_list.is_match(relative_file_path) {
-                continue;
-            }
             if is_binary(file_path)? {
                 continue;
             }

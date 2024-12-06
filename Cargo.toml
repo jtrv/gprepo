@@ -5,8 +5,8 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1"
-clap = "3"
-git2 = "0.13.24"
-globset = "0.4.8"
-structopt = "0.3.25"
+clap = "4"
+git2 = "0.19"
+globset = "0.4"
+structopt = "0.3"
 walkdir = "2"
